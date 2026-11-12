@@ -73,5 +73,34 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 分析维度定义包接入
+
+分析维度层级除了逐条维护，还支持接入上游治理系统交付的定义包（JSON 文件，
+示例见 `examples/`）。页面入口在「分析维度管理」：上传即校验，核对回执后再接入。
+
+- **校验**：层级编号唯一、父级必须存在于包内或现有维度树、无循环、同级先后
+  顺序不冲突、版本格式合法。校验不通过整包拒绝，不写入任何层级。
+- **裁决规则**：包内层级版本高于维度树同编号当前版本 → 以包为准覆盖（旧版本
+  保留供历史查询）；低于或等于 → 以现有维度树为准保留；同版本重复接入幂等跳过。
+- **断点续接**：接入按拓扑序逐层推进并记录进度，中断后调
+  `POST /api/dimension/packages/{id}/resume` 从最后一个已接入层级继续。
+- **幂等**：同一文件（内容指纹相同）重复上传返回原包回执；重复接入不产生重复层级。
+- **图表联动**：接入后引用这些维度的图表自动标记「待重新绑定」（读取时对照维度树
+  当前版本推导，与维度树同源），期间仍按绑定的历史版本取数
+  （`GET /api/chart/{id}/query`），在图表页执行「重新绑定」后切到当前版本。
+
+主要接口：
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/dimension/packages/upload` | 上传定义包并校验，返回回执 |
+| `GET  /api/dimension/packages` / `/{id}` | 定义包列表 / 详情与回执 |
+| `POST /api/dimension/packages/{id}/import` | 接入（`stop_after` 可演练中断） |
+| `POST /api/dimension/packages/{id}/resume` | 断点续接 |
+| `GET  /api/dimension/levels` | 维度层级树（`版本=` 查历史版本） |
+| `GET  /api/chart/{id}/query` | 按图表绑定版本取数验证 |
+
+端到端验证：起后端后执行 `python3 -I scripts/verify_dimension_package.py`。
+
 领域：数据工程
 子方向：数据分析与数据应用

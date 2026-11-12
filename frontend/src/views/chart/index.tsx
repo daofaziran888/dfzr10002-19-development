@@ -11,18 +11,16 @@ const columns = [
   "横轴字段",
   "纵轴字段",
   "筛选条件",
-  "刷新间隔"
+  "刷新间隔",
+  "关联维度",
+  "绑定版本说明",
+  "绑定状态"
 ]
 const actions = [
   "提交校验",
   "启用配置",
-  "停用配置"
-]
-const statuses = [
-  "草稿",
-  "待校验",
-  "已启用",
-  "已停用"
+  "停用配置",
+  "重新绑定"
 ]
 const stats = [
   {
@@ -45,6 +43,7 @@ export default function ChartView() {
   const [rows, setRows] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [errorMessage, setErrorMessage] = useState('')
+  const [infoMessage, setInfoMessage] = useState('')
   const [filters, setFilters] = useState<Record<string, string>>({})
   const filterFields = useMemo(() => columns.slice(0, 3), [])
 
@@ -70,17 +69,39 @@ export default function ChartView() {
 
   async function runAction(action: string, row: Row) {
     setErrorMessage('')
+    setInfoMessage('')
     try {
       const response = await request(`${ENDPOINT}/${row.id}/actions`, {
         method: 'POST',
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ values: { action } }),
       })
+      const payload = await response.json()
       if (!response.ok) {
         throw new Error('可视化图表配置动作未生效，请稍后重试')
+      }
+      if (payload.ok) {
+        setInfoMessage(payload.message)
+      } else {
+        setErrorMessage(payload.message)
       }
       await reload()
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '可视化图表配置操作失败')
+    }
+  }
+
+  async function tryQuery(row: Row) {
+    setErrorMessage('')
+    setInfoMessage('')
+    try {
+      const response = await request(`${ENDPOINT}/${row.id}/query`)
+      if (!response.ok) {
+        throw new Error('图表取数验证失败')
+      }
+      const payload = await response.json()
+      setInfoMessage(`${row.图表编号}：${payload.message}（绑定状态：${payload.绑定状态}）`)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '图表取数验证失败')
     }
   }
 
@@ -89,7 +110,7 @@ export default function ChartView() {
       <header className="page-head">
         <div>
           <h2>可视化图表配置管理</h2>
-          <p className="page-desc">维护可视化图表的类型选择、数据绑定与样式配置，实现分析结果可视化。</p>
+          <p className="page-desc">维护可视化图表的类型选择、数据绑定与样式配置，实现分析结果可视化。绑定状态与维度层级树同源：维度包接入后受影响图表自动标记待重新绑定，期间仍按历史绑定版本取数。</p>
         </div>
         <div className="page-actions">
           <button className="btn primary" type="button" onClick={() => setErrorMessage('图表配置登记入口尚未接入审批流')}>
@@ -135,13 +156,22 @@ export default function ChartView() {
         <tbody>
           {rows.map((row) => (
             <tr key={String(row.id)}>
-              {columns.map((column) => <td key={column}>{row[column] ?? '—'}</td>)}
+              {columns.map((column) => (
+                <td key={column}>
+                  {column === '绑定状态'
+                    ? <span className={`badge ${row.绑定状态 === '待重新绑定' ? 'warn' : row.绑定状态 === '已绑定' ? 'ok' : ''}`}>{row.绑定状态 ?? '—'}</span>
+                    : (row[column] ?? '—')}
+                </td>
+              ))}
               <td className="row-actions">
                 {actions.map((action) => (
                   <button key={action} className="link" type="button" onClick={() => void runAction(action, row)}>
                     {action}
                   </button>
                 ))}
+                <button className="link" type="button" onClick={() => void tryQuery(row)}>
+                  试查询
+                </button>
               </td>
             </tr>
           ))}
@@ -155,6 +185,7 @@ export default function ChartView() {
 
       <footer className="page-foot">
         <span>共 {total} 条可视化图表配置记录</span>
+        {infoMessage && <span className="ok-text">{infoMessage}</span>}
         {errorMessage && <span className="error-text">{errorMessage}</span>}
       </footer>
     </section>

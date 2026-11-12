@@ -1,4 +1,8 @@
-"""可视化图表配置接口：维护图表配置，覆盖提交校验、启用配置、停用配置等动作。"""
+"""可视化图表配置接口：维护图表配置，覆盖提交校验、启用配置、停用配置、重新绑定等动作。
+
+绑定状态（已绑定/待重新绑定）由服务层对照维度树当前版本实时推导，与维度树同源；
+GET /api/chart/{id}/query 按图表绑定的维度版本取数，用于验证待重新绑定期间仍可查询。
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -14,6 +18,13 @@ service = ChartService()
 
 LIST_FIELDS = ["图表编号", "图表名称", "图表类型", "数据源绑定", "横轴字段", "纵轴字段", "筛选条件", "刷新间隔"]
 STATUSES = ["草稿", "待校验", "已启用", "已停用"]
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出可视化图表配置清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "chart", "total": total, "items": items}
 
 
 @router.get("", response_model=PageResult[dict])
@@ -39,6 +50,15 @@ def get_entry(entry_id: int) -> dict:
     return entry
 
 
+@router.get("/{entry_id}/query", response_model=dict)
+def query_entry(entry_id: int) -> dict:
+    """按图表绑定的维度版本取数：待重新绑定期间仍按历史层级返回，保证可取数。"""
+    result, message = service.query_entry(entry_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=message)
+    return result
+
+
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
     """登记一条图表配置，缺字段时说明原因而不是静默丢弃。"""
@@ -50,16 +70,9 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条图表配置执行提交校验、启用配置、停用配置；不允许的动作会被拦下并说明原因。"""
+    """对单条图表配置执行提交校验、启用配置、停用配置、重新绑定；不允许的动作会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
     entry, message = service.run_action(entry_id, action)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出可视化图表配置清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "chart", "total": total, "items": items}

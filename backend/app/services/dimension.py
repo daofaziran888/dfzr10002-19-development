@@ -1,4 +1,8 @@
-"""分析维度管理业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""分析维度管理业务规则：状态流转、字段校验与筛选口径都收在这里。
+
+维度层级树（dimension_level）的读取助手也放在这里：层级行按（层级编号, 版本）
+唯一存储，是否当前 标记当前生效版本；历史版本行保留，供图表按绑定版本取数。
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -6,10 +10,49 @@ from typing import Any
 from app.store import store
 
 MODULE = "dimension"
+LEVEL_MODULE = "dimension_level"
 REQUIRED_FIELDS = ["维度编号", "维度名称", "维度表名"]
 STATUS_ORDER = ["草稿", "待审批", "已发布", "已废弃"]
 ACTION_RULES = {"提交审批": "待审批", "发布维度": "已发布", "废弃维度": "已废弃"}
 NEGATIVE_ACTIONS = []
+
+
+def list_levels(*, version: str | None = None, only_current: bool = True) -> list[dict[str, Any]]:
+    """读取维度层级树：默认只返回当前生效版本；指定版本时返回该版本的历史层级。"""
+    rows = list(store.rows(LEVEL_MODULE))
+    if version:
+        rows = [row for row in rows if str(row.get("版本")) == version]
+    elif only_current:
+        rows = [row for row in rows if row.get("是否当前")]
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("父级编号") or ""),
+            int(row.get("顺序") or 0),
+            str(row.get("层级编号") or ""),
+        ),
+    )
+
+
+def current_version_map() -> dict[str, str]:
+    """维度树当前生效版本：{层级编号: 版本}，是图表绑定状态推导的唯一数据源。"""
+    return {
+        str(row.get("层级编号")): str(row.get("版本"))
+        for row in store.rows(LEVEL_MODULE)
+        if row.get("是否当前")
+    }
+
+
+def find_level(code: str, version: str | None = None) -> dict[str, Any] | None:
+    """按编号取层级；给了版本就取历史版本行，否则取当前生效行。"""
+    for row in store.rows(LEVEL_MODULE):
+        if str(row.get("层级编号")) != code:
+            continue
+        if version is None and row.get("是否当前"):
+            return row
+        if version is not None and str(row.get("版本")) == version:
+            return row
+    return None
 
 
 class DimensionService:
